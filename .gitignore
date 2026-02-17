@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+*.egg-info/
+dist/
+output/
+assets/products/
+assets/models/
+*.mp4
+*.avi
+*.mov
+.ruff_cache/
