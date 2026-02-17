@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>TikTok Authorization</title>
+    <style>body{font-family:Arial,sans-serif;max-width:600px;margin:80px auto;padding:0 20px;text-align:center}code{background:#f0f0f0;padding:8px 16px;border-radius:4px;font-size:18px;display:inline-block;margin:10px 0;user-select:all}.success{color:#22c55e}.error{color:#ef4444}</style>
+</head>
+<body>
+    <h1>TikTok Authorization</h1>
+    <div id="result"></div>
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get('code');
+        const error = params.get('error');
+        const el = document.getElementById('result');
+
+        if (code) {
+            el.innerHTML = `
+                <p class="success">Authorization successful!</p>
+                <p>Copy this code and paste it into your terminal:</p>
+                <code>${code}</code>
+                <p style="color:#666;margin-top:20px">This code expires in 10 minutes.</p>
+            `;
+        } else if (error) {
+            el.innerHTML = `<p class="error">Authorization failed: ${error}</p>`;
+        } else {
+            el.innerHTML = `<p>Waiting for authorization...</p>`;
+        }
+    </script>
+</body>
+</html>
