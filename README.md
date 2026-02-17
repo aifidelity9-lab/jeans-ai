@@ -33,6 +33,83 @@ graph TD
     style F fill:#000,color:#fff
 ```
 
+## 🔄 Business Logic Flow
+
+```mermaid
+flowchart TB
+    subgraph INPUT["📥 Input Layer"]
+        direction LR
+        P["👖 Product Photos<br/>(flat-lay jeans)"]
+        M["💃 Model Photos<br/>(diverse full-body)"]
+        DB[(🗄️ PostgreSQL<br/>Products & Models)]
+    end
+
+    subgraph AI["🧠 AI Processing Layer"]
+        direction LR
+        TRYON["👗 Virtual Try-On<br/>IDM-VTON on Replicate<br/>~$0.023/image"]
+        VIDEO["🎥 Video Generation<br/>Kling v1.6 Pro<br/>~$0.10/video"]
+    end
+
+    subgraph EDIT["✂️ Post-Production Layer"]
+        direction LR
+        RESIZE["📐 Resize to 9:16<br/>(1080×1920)"]
+        TEXT["✏️ Add Caption<br/>+ CTA Overlay"]
+        MUSIC["🎵 Add Background<br/>Music (30% vol)"]
+        EXPORT["📦 Export MP4<br/>(H.264 / AAC)"]
+    end
+
+    subgraph PUBLISH["📱 Distribution Layer"]
+        direction LR
+        TT["<img src='https://img.shields.io/badge/-TikTok-000?style=flat-square&logo=tiktok&logoColor=white' />"]
+        IG["<img src='https://img.shields.io/badge/-Instagram-E4405F?style=flat-square&logo=instagram&logoColor=white' />"]
+        YT["<img src='https://img.shields.io/badge/-YouTube-FF0000?style=flat-square&logo=youtube&logoColor=white' />"]
+    end
+
+    subgraph SCHEDULE["⏰ Scheduler"]
+        CRON["🤖 APScheduler<br/>Daily 6:00 AM EST"]
+        API["🌐 Manual Trigger<br/>POST /api/pipeline/daily"]
+    end
+
+    P --> DB
+    M --> DB
+    DB --> TRYON
+    TRYON -->|"N products × M models<br/>= N×M try-on images"| VIDEO
+    VIDEO -->|"5-sec fashion clips"| RESIZE
+    RESIZE --> TEXT --> MUSIC --> EXPORT
+    EXPORT -->|"up to 100 videos/day"| TT
+    EXPORT --> IG
+    EXPORT --> YT
+    SCHEDULE -.->|triggers| TRYON
+
+    style INPUT fill:#1a1a2e,color:#fff
+    style AI fill:#16213e,color:#fff
+    style EDIT fill:#0f3460,color:#fff
+    style PUBLISH fill:#533483,color:#fff
+    style SCHEDULE fill:#e94560,color:#fff
+```
+
+```mermaid
+sequenceDiagram
+    participant U as 👤 User / Scheduler
+    participant API as 🚀 FastAPI
+    participant R as 🤖 Replicate
+    participant MP as ✂️ MoviePy
+    participant TT as 📱 TikTok
+
+    U->>API: POST /api/pipeline/daily
+    loop For each Product × Model
+        API->>R: IDM-VTON try-on request
+        R-->>API: Try-on image URL
+        API->>R: Kling v1.6 video request
+        R-->>API: Video URL (.mp4)
+        API->>MP: Compose (resize + caption + CTA)
+        MP-->>API: Final video path
+    end
+    API->>TT: OAuth + Upload video
+    TT-->>API: Publish complete
+    API-->>U: ✅ 100 videos generated & published
+```
+
 ## 💎 Tech Stack
 
 | Layer | Technology | Badge |
