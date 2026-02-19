@@ -29,6 +29,9 @@ ai = [
 video = [
     "moviepy>=2.1",
 ]
+raw = [
+    "rawpy>=0.21",
+]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.25",
