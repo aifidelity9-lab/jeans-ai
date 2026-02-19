@@ -36,22 +36,37 @@ async def run_tryon(
         URL of the generated try-on image.
     """
     loop = asyncio.get_event_loop()
-    output = await loop.run_in_executor(
-        None,
-        lambda: replicate.run(
-            IDMVTON_MODEL,
-            input={
-                "human_img": human_img,
-                "garm_img": garment_img,
-                "garment_des": garment_desc,
-                "category": category,
-                "crop": crop,
-                "steps": steps,
-                "seed": seed,
-            },
-        ),
-    )
-    result_url = str(output)
+
+    def _run():
+        input_data = {
+            "garment_des": garment_desc,
+            "category": category,
+            "crop": crop,
+            "steps": steps,
+            "seed": seed,
+        }
+        # Handle local file vs URL for human image
+        if isinstance(human_img, str) and not human_img.startswith("http"):
+            input_data["human_img"] = open(human_img, "rb")
+        else:
+            input_data["human_img"] = human_img
+        # Handle local file vs URL for garment image
+        if isinstance(garment_img, str) and not garment_img.startswith("http"):
+            input_data["garm_img"] = open(garment_img, "rb")
+        else:
+            input_data["garm_img"] = garment_img
+        return replicate.run(IDMVTON_MODEL, input=input_data)
+
+    output = await loop.run_in_executor(None, _run)
+    # Extract URL from FileOutput or string
+    if hasattr(output, 'url'):
+        result_url = str(output.url)
+    elif isinstance(output, str):
+        result_url = output
+    else:
+        result_url = str(output)
+    if not result_url or not result_url.startswith("http"):
+        raise RuntimeError(f"Try-on returned invalid result: {type(output)}")
     logger.info(f"Try-on complete: {result_url}")
     return result_url
 

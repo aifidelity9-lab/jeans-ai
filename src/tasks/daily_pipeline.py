@@ -80,44 +80,53 @@ async def run_single(
         "status": "started",
     }
 
-    try:
-        # Stage 1: Try-on
-        logger.info(f"[{index}] Stage 1: Try-on {Path(garment_path).name} × {Path(model_path).name}")
-        tryon_url = await run_tryon(
-            human_img=open(model_path, "rb"),
-            garment_img=open(garment_path, "rb"),
-            garment_desc="Women's denim jeans",
-        )
-        tryon_local = await download_image(
-            tryon_url, f"{output_base}/tryon/tryon_{index:04d}.png"
-        )
-        result["tryon"] = tryon_local
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            # Stage 1: Try-on
+            logger.info(f"[{index}] Stage 1: Try-on {Path(garment_path).name} × {Path(model_path).name}")
+            tryon_url = await run_tryon(
+                human_img=model_path,
+                garment_img=garment_path,
+                garment_desc="Women's denim jeans",
+            )
+            tryon_local = await download_image(
+                tryon_url, f"{output_base}/tryon/tryon_{index:04d}.png"
+            )
+            result["tryon"] = tryon_local
 
-        # Stage 2: Video generation
-        logger.info(f"[{index}] Stage 2: Video generation")
-        prompt = VIDEO_PROMPTS[index % len(VIDEO_PROMPTS)]
-        video_url = await generate_video(image_path=tryon_url, prompt=prompt)
-        video_local = await download_video(
-            video_url, f"{output_base}/videos/video_{index:04d}.mp4"
-        )
-        result["video"] = video_local
+            # Stage 2: Video generation
+            logger.info(f"[{index}] Stage 2: Video generation")
+            prompt = VIDEO_PROMPTS[index % len(VIDEO_PROMPTS)]
+            video_url = await generate_video(image_path=tryon_url, prompt=prompt)
+            video_local = await download_video(
+                video_url, f"{output_base}/videos/video_{index:04d}.mp4"
+            )
+            result["video"] = video_local
 
-        # Stage 3: Compose final video
-        logger.info(f"[{index}] Stage 3: Composing final video")
-        caption = CAPTIONS[index % len(CAPTIONS)]
-        final_path = compose_video(
-            video_clips=[video_local],
-            output_path=f"{output_base}/final/final_{index:04d}.mp4",
-            caption=caption,
-        )
-        result["final"] = final_path
-        result["status"] = "complete"
-        logger.info(f"[{index}] Complete: {final_path}")
+            # Stage 3: Compose final video
+            logger.info(f"[{index}] Stage 3: Composing final video")
+            caption = CAPTIONS[index % len(CAPTIONS)]
+            final_path = compose_video(
+                video_clips=[video_local],
+                output_path=f"{output_base}/final/final_{index:04d}.mp4",
+                caption=caption,
+            )
+            result["final"] = final_path
+            result["status"] = "complete"
+            logger.info(f"[{index}] Complete: {final_path}")
+            break  # Success, exit retry loop
 
-    except Exception as e:
-        result["status"] = "failed"
-        result["error"] = str(e)
-        logger.error(f"[{index}] Failed: {e}")
+        except Exception as e:
+            error_str = str(e)
+            if "429" in error_str and attempt < max_retries - 1:
+                wait = 15 * (attempt + 1)
+                logger.warning(f"[{index}] Rate limited, retrying in {wait}s... (attempt {attempt+1}/{max_retries})")
+                await asyncio.sleep(wait)
+                continue
+            result["status"] = "failed"
+            result["error"] = error_str
+            logger.error(f"[{index}] Failed: {e}")
 
     return result
 

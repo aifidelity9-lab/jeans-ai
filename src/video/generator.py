@@ -48,7 +48,13 @@ async def generate_video(
         return replicate.run(KLING_MODEL, input=input_data)
 
     output = await loop.run_in_executor(None, _run)
-    result_url = str(output)
+    # Extract URL from FileOutput or string
+    if hasattr(output, 'url'):
+        result_url = str(output.url)
+    elif isinstance(output, str):
+        result_url = output
+    else:
+        result_url = str(output)
     logger.info(f"Video generated: {result_url}")
     return result_url
 
