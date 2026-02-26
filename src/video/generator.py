@@ -1,15 +1,29 @@
 import asyncio
 import logging
+import time
+import uuid
 from pathlib import Path
 
 import httpx
-import replicate
+from PIL import Image as PILImage
+from google import genai
+from google.genai import types as genai_types
 
 from src.config import settings
 
 logger = logging.getLogger(__name__)
 
-KLING_MODEL = "kwaivgi/kling-v1.6-pro"
+VEO_MODEL = "veo-3.1-fast-generate-preview"
+
+_client: genai.Client | None = None
+
+
+def _get_client() -> genai.Client:
+    """Lazy-initialize the Gemini client."""
+    global _client
+    if _client is None:
+        _client = genai.Client(api_key=settings.gemini_api_key)
+    return _client
 
 
 async def generate_video(
@@ -17,58 +31,101 @@ async def generate_video(
     prompt: str = "A fashion model walks naturally towards the camera, showing off her jeans, natural lighting, studio background",
     duration: int = 5,
     cfg_scale: float = 0.5,
+    output_dir: str = "output/videos",
 ) -> str:
-    """Generate a video from a try-on image using Kling v1.6 Pro.
+    """Generate a video from a try-on image using Google Veo.
 
     Args:
         image_path: Local file path or URL of the input image.
         prompt: Text prompt describing the desired motion.
-        duration: Video duration in seconds (5 or 10).
-        cfg_scale: Prompt adherence (0-1). Lower = more creative.
+        duration: Video duration in seconds (4, 6, or 8).
+        cfg_scale: Legacy param (unused with Veo), kept for compatibility.
+        output_dir: Directory to save the generated video.
 
     Returns:
-        URL of the generated video.
+        Local file path to the generated video.
     """
+    # Load input image
+    if image_path.startswith("http"):
+        async with httpx.AsyncClient() as http_client:
+            resp = await http_client.get(image_path, follow_redirects=True)
+            resp.raise_for_status()
+            import io
+            image = PILImage.open(io.BytesIO(resp.content))
+    else:
+        image = PILImage.open(image_path)
+
+    # Map duration to nearest Veo-supported value
+    veo_duration = str(min(8, max(4, duration)))
+
+    client = _get_client()
     loop = asyncio.get_event_loop()
 
-    def _run():
-        input_data = {
-            "prompt": prompt,
-            "duration": duration,
-            "cfg_scale": cfg_scale,
-            "negative_prompt": "blurry, distorted, ugly, deformed legs, extra limbs",
-        }
+    # Start video generation (async operation)
+    def _start():
+        return client.models.generate_videos(
+            model=VEO_MODEL,
+            prompt=prompt,
+            image=image,
+            config=genai_types.GenerateVideosConfig(
+                aspect_ratio="9:16",
+                duration_seconds=veo_duration,
+                negative_prompt="blurry, distorted, ugly, deformed legs, extra limbs",
+            ),
+        )
 
-        # Handle local file vs URL
-        if image_path.startswith("http"):
-            input_data["start_image"] = image_path
-        else:
-            input_data["start_image"] = open(image_path, "rb")
+    logger.info(f"Starting Veo video generation ({veo_duration}s)...")
+    operation = await loop.run_in_executor(None, _start)
 
-        return replicate.run(KLING_MODEL, input=input_data)
+    # Poll until done
+    def _poll():
+        op = operation
+        while not op.done:
+            time.sleep(5)
+            op = client.operations.get(op)
+        return op
 
-    output = await loop.run_in_executor(None, _run)
-    # Extract URL from FileOutput or string
-    if hasattr(output, 'url'):
-        result_url = str(output.url)
-    elif isinstance(output, str):
-        result_url = output
-    else:
-        result_url = str(output)
-    logger.info(f"Video generated: {result_url}")
-    return result_url
+    logger.info("Waiting for video generation to complete...")
+    result_op = await loop.run_in_executor(None, _poll)
 
+    # Save the video locally
+    generated_video = result_op.response.generated_videos[0]
 
-async def download_video(url: str, save_path: str) -> str:
-    """Download a video from URL and save locally."""
-    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.get(url, follow_redirects=True)
-        resp.raise_for_status()
-        with open(save_path, "wb") as f:
-            f.write(resp.content)
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    filename = f"video_{uuid.uuid4().hex[:12]}.mp4"
+    save_path = str(Path(output_dir) / filename)
+
+    def _save():
+        client.files.download(file=generated_video.video)
+        generated_video.video.save(save_path)
+
+    await loop.run_in_executor(None, _save)
+
     logger.info(f"Video saved to {save_path}")
     return save_path
+
+
+async def download_video(url_or_path: str, save_path: str) -> str:
+    """Download a video from URL, or copy a local file to save_path."""
+    if url_or_path.startswith("http"):
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.get(url_or_path, follow_redirects=True)
+            resp.raise_for_status()
+            with open(save_path, "wb") as f:
+                f.write(resp.content)
+        logger.info(f"Video downloaded to {save_path}")
+        return save_path
+    else:
+        import shutil
+        source = Path(url_or_path)
+        target = Path(save_path)
+        if source.resolve() == target.resolve():
+            return save_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(source), str(target))
+        logger.info(f"Video copied to {save_path}")
+        return save_path
 
 
 async def batch_generate_videos(
@@ -84,7 +141,7 @@ async def batch_generate_videos(
         output_dir: Directory to save results.
 
     Returns:
-        List of dicts with image_path, video_url, local_path.
+        List of dicts with image_path, video_path, local_path.
     """
     default_prompts = [
         "A fashion model walks confidently towards the camera, showing off her jeans, studio lighting",
@@ -103,11 +160,11 @@ async def batch_generate_videos(
         else:
             prompt = default_prompts[i % len(default_prompts)]
 
-        tasks.append(generate_video(image_path=img_path, prompt=prompt))
+        tasks.append(generate_video(image_path=img_path, prompt=prompt, output_dir=output_dir))
 
-    video_urls = await asyncio.gather(*tasks, return_exceptions=True)
+    video_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    for i, (img_path, result) in enumerate(zip(image_paths, video_urls)):
+    for i, (img_path, result) in enumerate(zip(image_paths, video_results)):
         if isinstance(result, Exception):
             logger.error(f"Video generation failed for {img_path}: {result}")
             results.append({"image_path": img_path, "error": str(result)})
@@ -117,7 +174,7 @@ async def batch_generate_videos(
         await download_video(result, save_path)
         results.append({
             "image_path": img_path,
-            "video_url": result,
+            "video_path": result,
             "local_path": save_path,
         })
 

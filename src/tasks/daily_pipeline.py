@@ -98,9 +98,9 @@ async def run_single(
             # Stage 2: Video generation
             logger.info(f"[{index}] Stage 2: Video generation")
             prompt = VIDEO_PROMPTS[index % len(VIDEO_PROMPTS)]
-            video_url = await generate_video(image_path=tryon_local, prompt=prompt)
+            video_path = await generate_video(image_path=tryon_local, prompt=prompt)
             video_local = await download_video(
-                video_url, f"{output_base}/videos/video_{index:04d}.mp4"
+                video_path, f"{output_base}/videos/video_{index:04d}.mp4"
             )
             result["video"] = video_local
 

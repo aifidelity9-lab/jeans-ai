@@ -53,12 +53,12 @@ async def run_pipeline(req: PipelineRequest):
 
     # Stage 2: Generate video from try-on image
     logger.info("Stage 2: Video generation...")
-    video_url = await generate_video(
+    video_path = await generate_video(
         image_path=tryon_local,
         prompt=req.video_prompt,
     )
-    video_local = await download_video(video_url, "output/videos/pipeline_video.mp4")
-    results["stages"]["video"] = {"url": video_url, "local": video_local}
+    video_local = await download_video(video_path, "output/videos/pipeline_video.mp4")
+    results["stages"]["video"] = {"local": video_local}
 
     # Stage 3: Compose final video with overlays
     logger.info("Stage 3: Composing final video...")
@@ -98,9 +98,9 @@ async def run_batch_pipeline(req: BatchPipelineRequest):
             )
 
             # Video
-            video_url = await generate_video(image_path=tryon_local)
+            video_path = await generate_video(image_path=tryon_local)
             video_local = await download_video(
-                video_url, f"output/videos/batch_{i:04d}.mp4"
+                video_path, f"output/videos/batch_{i:04d}.mp4"
             )
 
             # Compose
