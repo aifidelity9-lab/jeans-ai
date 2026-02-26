@@ -24,14 +24,14 @@ class BatchTryonRequest(BaseModel):
 async def single_tryon(req: TryonRequest):
     """Test a single try-on: one model + one garment."""
     try:
-        result_url = await run_tryon(
+        result_path = await run_tryon(
             human_img=req.human_img,
             garment_img=req.garment_img,
             garment_desc=req.garment_desc,
             category=req.category,
             crop=req.crop,
         )
-        return {"status": "success", "result_url": result_url}
+        return {"status": "success", "result_path": result_path}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -85,20 +85,20 @@ async def run_single(
         try:
             # Stage 1: Try-on
             logger.info(f"[{index}] Stage 1: Try-on {Path(garment_path).name} × {Path(model_path).name}")
-            tryon_url = await run_tryon(
+            tryon_path = await run_tryon(
                 human_img=model_path,
                 garment_img=garment_path,
                 garment_desc="Women's denim jeans",
             )
             tryon_local = await download_image(
-                tryon_url, f"{output_base}/tryon/tryon_{index:04d}.png"
+                tryon_path, f"{output_base}/tryon/tryon_{index:04d}.png"
             )
             result["tryon"] = tryon_local
 
             # Stage 2: Video generation
             logger.info(f"[{index}] Stage 2: Video generation")
             prompt = VIDEO_PROMPTS[index % len(VIDEO_PROMPTS)]
-            video_url = await generate_video(image_path=tryon_url, prompt=prompt)
+            video_url = await generate_video(image_path=tryon_local, prompt=prompt)
             video_local = await download_video(
                 video_url, f"{output_base}/videos/video_{index:04d}.mp4"
             )

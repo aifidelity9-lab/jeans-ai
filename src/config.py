@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     # AI Services
     replicate_api_token: str = ""
+    gemini_api_key: str = ""
     kling_api_key: str = ""
     runway_api_key: str = ""
 

@@ -43,18 +43,18 @@ async def run_pipeline(req: PipelineRequest):
 
     # Stage 1: Virtual try-on
     logger.info("Stage 1: Virtual try-on...")
-    tryon_url = await run_tryon(
+    tryon_path = await run_tryon(
         human_img=req.human_img,
         garment_img=req.garment_img,
         garment_desc=req.garment_desc,
     )
-    tryon_local = await download_image(tryon_url, "output/tryon/pipeline_tryon.png")
-    results["stages"]["tryon"] = {"url": tryon_url, "local": tryon_local}
+    tryon_local = await download_image(tryon_path, "output/tryon/pipeline_tryon.png")
+    results["stages"]["tryon"] = {"local": tryon_local}
 
     # Stage 2: Generate video from try-on image
     logger.info("Stage 2: Video generation...")
     video_url = await generate_video(
-        image_path=tryon_url,  # Use URL directly
+        image_path=tryon_local,
         prompt=req.video_prompt,
     )
     video_local = await download_video(video_url, "output/videos/pipeline_video.mp4")
@@ -88,17 +88,17 @@ async def run_batch_pipeline(req: BatchPipelineRequest):
         logger.info(f"Processing model {i+1}/{len(req.human_imgs)}...")
         try:
             # Try-on
-            tryon_url = await run_tryon(
+            tryon_path = await run_tryon(
                 human_img=human_img,
                 garment_img=req.garment_img,
                 garment_desc=req.garment_desc,
             )
             tryon_local = await download_image(
-                tryon_url, f"output/tryon/batch_{i:04d}.png"
+                tryon_path, f"output/tryon/batch_{i:04d}.png"
             )
 
             # Video
-            video_url = await generate_video(image_path=tryon_url)
+            video_url = await generate_video(image_path=tryon_local)
             video_local = await download_video(
                 video_url, f"output/videos/batch_{i:04d}.mp4"
             )
