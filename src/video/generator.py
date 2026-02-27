@@ -1,11 +1,11 @@
 import asyncio
 import logging
+import shutil
 import time
 import uuid
 from pathlib import Path
 
 import httpx
-from PIL import Image as PILImage
 from google import genai
 from google.genai import types as genai_types
 
@@ -13,169 +13,172 @@ from src.config import settings
 
 logger = logging.getLogger(__name__)
 
-VEO_MODEL = "veo-3.1-fast-generate-preview"
 
-_client: genai.Client | None = None
+class VideoGenerator:
+    """Video generation engine using Google Veo API."""
 
+    DEFAULT_MODEL = "veo-3.1-fast-generate-preview"
+    DEFAULT_ASPECT_RATIO = "9:16"
+    DEFAULT_DURATION = 8  # Veo requires 8s when using reference image
 
-def _get_client() -> genai.Client:
-    """Lazy-initialize the Gemini client."""
-    global _client
-    if _client is None:
-        _client = genai.Client(api_key=settings.gemini_api_key)
-    return _client
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = DEFAULT_MODEL,
+        aspect_ratio: str = DEFAULT_ASPECT_RATIO,
+        duration: int = DEFAULT_DURATION,
+    ):
+        self._api_key = api_key or settings.gemini_api_key
+        self.model = model
+        self.aspect_ratio = aspect_ratio
+        self.duration = duration
+        self._client: genai.Client | None = None
 
+    @property
+    def client(self) -> genai.Client:
+        if self._client is None:
+            self._client = genai.Client(api_key=self._api_key)
+        return self._client
 
-async def generate_video(
-    image_path: str,
-    prompt: str = "A fashion model walks naturally towards the camera, showing off her jeans, natural lighting, studio background",
-    duration: int = 5,
-    cfg_scale: float = 0.5,
-    output_dir: str = "output/videos",
-) -> str:
-    """Generate a video from a try-on image using Google Veo.
+    # ── File helpers ─────────────────────────────────────────────
 
-    Args:
-        image_path: Local file path or URL of the input image.
-        prompt: Text prompt describing the desired motion.
-        duration: Video duration in seconds (4, 6, or 8).
-        cfg_scale: Legacy param (unused with Veo), kept for compatibility.
-        output_dir: Directory to save the generated video.
-
-    Returns:
-        Local file path to the generated video.
-    """
-    # Load input image
-    if image_path.startswith("http"):
-        async with httpx.AsyncClient() as http_client:
-            resp = await http_client.get(image_path, follow_redirects=True)
-            resp.raise_for_status()
-            import io
-            image = PILImage.open(io.BytesIO(resp.content))
-    else:
-        image = PILImage.open(image_path)
-
-    # Map duration to nearest Veo-supported value
-    veo_duration = str(min(8, max(4, duration)))
-
-    client = _get_client()
-    loop = asyncio.get_event_loop()
-
-    # Start video generation (async operation)
-    def _start():
-        return client.models.generate_videos(
-            model=VEO_MODEL,
-            prompt=prompt,
-            image=image,
-            config=genai_types.GenerateVideosConfig(
-                aspect_ratio="9:16",
-                duration_seconds=veo_duration,
-                negative_prompt="blurry, distorted, ugly, deformed legs, extra limbs",
-            ),
-        )
-
-    logger.info(f"Starting Veo video generation ({veo_duration}s)...")
-    operation = await loop.run_in_executor(None, _start)
-
-    # Poll until done
-    def _poll():
-        op = operation
-        while not op.done:
-            time.sleep(5)
-            op = client.operations.get(op)
-        return op
-
-    logger.info("Waiting for video generation to complete...")
-    result_op = await loop.run_in_executor(None, _poll)
-
-    # Save the video locally
-    generated_video = result_op.response.generated_videos[0]
-
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-    filename = f"video_{uuid.uuid4().hex[:12]}.mp4"
-    save_path = str(Path(output_dir) / filename)
-
-    def _save():
-        client.files.download(file=generated_video.video)
-        generated_video.video.save(save_path)
-
-    await loop.run_in_executor(None, _save)
-
-    logger.info(f"Video saved to {save_path}")
-    return save_path
-
-
-async def download_video(url_or_path: str, save_path: str) -> str:
-    """Download a video from URL, or copy a local file to save_path."""
-    if url_or_path.startswith("http"):
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.get(url_or_path, follow_redirects=True)
-            resp.raise_for_status()
-            with open(save_path, "wb") as f:
-                f.write(resp.content)
-        logger.info(f"Video downloaded to {save_path}")
-        return save_path
-    else:
-        import shutil
+    @staticmethod
+    async def download(url_or_path: str, save_path: str) -> str:
+        """Download from URL or copy local file to save_path."""
+        if url_or_path.startswith("http"):
+            Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+            async with httpx.AsyncClient(timeout=120) as http:
+                resp = await http.get(url_or_path, follow_redirects=True)
+                resp.raise_for_status()
+                with open(save_path, "wb") as f:
+                    f.write(resp.content)
+            return save_path
         source = Path(url_or_path)
         target = Path(save_path)
         if source.resolve() == target.resolve():
             return save_path
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(str(source), str(target))
-        logger.info(f"Video copied to {save_path}")
         return save_path
 
+    # ── Core video generation ────────────────────────────────────
 
-async def batch_generate_videos(
-    image_paths: list[str],
-    prompts: list[str] | None = None,
-    output_dir: str = "output/videos",
-) -> list[dict]:
-    """Generate videos from multiple try-on images.
-
-    Args:
-        image_paths: List of local paths or URLs to try-on images.
-        prompts: Optional list of prompts (one per image). Uses default if None.
-        output_dir: Directory to save results.
-
-    Returns:
-        List of dicts with image_path, video_path, local_path.
-    """
-    default_prompts = [
-        "A fashion model walks confidently towards the camera, showing off her jeans, studio lighting",
-        "A woman turns slowly to show her outfit from different angles, natural movement, clean background",
-        "A model poses naturally, shifting weight between legs, showing the fit of her jeans, soft lighting",
-        "A woman walks along a street, casual confident stride, showing her denim jeans, natural daylight",
-        "A fashion model does a slow spin to show the full outfit, studio background, professional lighting",
-    ]
-
-    results = []
-    tasks = []
-
-    for i, img_path in enumerate(image_paths):
-        if prompts and i < len(prompts):
-            prompt = prompts[i]
+    async def generate(
+        self,
+        image_path: str,
+        prompt: str = "A fashion model walks naturally towards the camera, showing off her outfit, natural lighting, studio background",
+        output_dir: str = "output/videos",
+    ) -> str:
+        """Generate a video from a try-on image. Returns local path to video."""
+        # Load image bytes
+        if image_path.startswith("http"):
+            async with httpx.AsyncClient() as http:
+                resp = await http.get(image_path, follow_redirects=True)
+                resp.raise_for_status()
+                image_bytes = resp.content
         else:
-            prompt = default_prompts[i % len(default_prompts)]
+            with open(image_path, "rb") as f:
+                image_bytes = f.read()
 
-        tasks.append(generate_video(image_path=img_path, prompt=prompt, output_dir=output_dir))
+        mime_type = "image/png" if image_path.lower().endswith(".png") else "image/jpeg"
+        image = genai_types.Image(image_bytes=image_bytes, mime_type=mime_type)
 
-    video_results = await asyncio.gather(*tasks, return_exceptions=True)
+        client = self.client
+        loop = asyncio.get_event_loop()
 
-    for i, (img_path, result) in enumerate(zip(image_paths, video_results)):
-        if isinstance(result, Exception):
-            logger.error(f"Video generation failed for {img_path}: {result}")
-            results.append({"image_path": img_path, "error": str(result)})
-            continue
+        def _start():
+            return client.models.generate_videos(
+                model=self.model,
+                prompt=prompt,
+                image=image,
+                config=genai_types.GenerateVideosConfig(
+                    aspect_ratio=self.aspect_ratio,
+                    duration_seconds=self.duration,
+                    negative_prompt="blurry, distorted, ugly, deformed legs, extra limbs",
+                ),
+            )
 
-        save_path = f"{output_dir}/video_{i:04d}.mp4"
-        await download_video(result, save_path)
-        results.append({
-            "image_path": img_path,
-            "video_path": result,
-            "local_path": save_path,
-        })
+        logger.info(f"Starting Veo video generation ({self.duration}s)...")
+        operation = await loop.run_in_executor(None, _start)
 
-    return results
+        def _poll():
+            op = operation
+            while not op.done:
+                time.sleep(5)
+                op = client.operations.get(op)
+            return op
+
+        logger.info("Waiting for video generation to complete...")
+        result_op = await loop.run_in_executor(None, _poll)
+
+        generated_video = result_op.response.generated_videos[0]
+
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        filename = f"video_{uuid.uuid4().hex[:12]}.mp4"
+        save_path = str(Path(output_dir) / filename)
+
+        def _save():
+            client.files.download(file=generated_video.video)
+            generated_video.video.save(save_path)
+
+        await loop.run_in_executor(None, _save)
+
+        logger.info(f"Video saved to {save_path}")
+        return save_path
+
+    async def batch_generate(
+        self,
+        image_paths: list[str],
+        prompts: list[str] | None = None,
+        output_dir: str = "output/videos",
+    ) -> list[dict]:
+        """Generate videos from multiple images."""
+        default_prompts = [
+            "A fashion model walks confidently towards the camera, showing off her outfit, studio lighting",
+            "A woman turns slowly to show her outfit from different angles, natural movement, clean background",
+            "A model poses naturally, shifting weight, showing the fit of her outfit, soft lighting",
+            "A woman walks along a street, casual confident stride, showing her outfit, natural daylight",
+            "A fashion model does a slow spin to show the full outfit, studio background, professional lighting",
+        ]
+
+        tasks = []
+        for i, img_path in enumerate(image_paths):
+            prompt = prompts[i] if prompts and i < len(prompts) else default_prompts[i % len(default_prompts)]
+            tasks.append(self.generate(image_path=img_path, prompt=prompt, output_dir=output_dir))
+
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        results = []
+        for i, (img_path, result) in enumerate(zip(image_paths, raw_results)):
+            if isinstance(result, Exception):
+                logger.error(f"Video generation failed for {img_path}: {result}")
+                results.append({"image_path": img_path, "error": str(result)})
+            else:
+                save_path = f"{output_dir}/video_{i:04d}.mp4"
+                await self.download(result, save_path)
+                results.append({"image_path": img_path, "video_path": result, "local_path": save_path})
+        return results
+
+
+# ── Default singleton for backward compatibility ─────────────────
+_default_generator: VideoGenerator | None = None
+
+
+def get_generator() -> VideoGenerator:
+    global _default_generator
+    if _default_generator is None:
+        _default_generator = VideoGenerator()
+    return _default_generator
+
+
+# ── Backward-compatible module-level functions ───────────────────
+async def generate_video(image_path: str, prompt: str = "A fashion model walks naturally towards the camera, showing off her outfit, natural lighting, studio background", output_dir: str = "output/videos", **kwargs) -> str:
+    return await get_generator().generate(image_path=image_path, prompt=prompt, output_dir=output_dir)
+
+
+async def download_video(url_or_path: str, save_path: str) -> str:
+    return await VideoGenerator.download(url_or_path, save_path)
+
+
+async def batch_generate_videos(**kwargs) -> list[dict]:
+    return await get_generator().batch_generate(**kwargs)

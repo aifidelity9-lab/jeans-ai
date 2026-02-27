@@ -8,8 +8,8 @@ from src.tryon.engine import run_tryon
 
 
 async def main():
-    garment = "assets/products/jeans-1.jpg"
-    model = "assets/models/2.png"
+    garment = "assets/products/jeans/jeans-1.jpg"
+    model = "assets/models/jeans/2.png"
     output_dir = "output/test_single"
 
     print(f"Garment: {garment}")

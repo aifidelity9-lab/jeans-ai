@@ -1,0 +1,45 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "T-shirt batch try-on",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "tests.test_tshirt_batch",
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe"
+        },
+        {
+            "name": "T-shirt full pipeline",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "tests.test_tshirt_pipeline",
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe"
+        },
+        {
+            "name": "Jeans batch try-on",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "tests.test_batch_all",
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe"
+        },
+        {
+            "name": "Jeans full pipeline",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "tests.test_full_pipeline",
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe"
+        },
+        {
+            "name": "Run current file",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe"
+        }
+    ]
+}

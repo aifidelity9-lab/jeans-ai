@@ -10,8 +10,8 @@ from google.genai import types as genai_types
 
 async def test_single_tryon():
     """Test a single try-on with real assets, with step-by-step logging."""
-    human_img = "assets/models/2.png"
-    garment_img = "assets/products/jeans-1.jpg"
+    human_img = "assets/models/jeans/2.png"
+    garment_img = "assets/products/jeans/jeans-1.jpg"
     output_dir = "output/test_gemini"
 
     # Step 1: Load images

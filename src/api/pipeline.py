@@ -15,14 +15,15 @@ router = APIRouter()
 
 class PipelineRequest(BaseModel):
     """Run the full pipeline for one product + one model."""
-    garment_img: str  # URL or local path to jeans image
+    garment_img: str  # URL or local path to garment image
     human_img: str  # URL or local path to model image
     garment_desc: str = "Women's light blue denim jeans"
+    category: str = "lower_body"  # "lower_body" (jeans) or "upper_body" (tshirts)
     caption: str = "Your new favorite jeans"
     cta_text: str = "Shop now - Link in bio"
     video_prompt: str = (
         "A fashion model walks naturally towards the camera, "
-        "showing off her jeans, confident stride, studio lighting"
+        "showing off her outfit, confident stride, studio lighting"
     )
 
 
@@ -31,6 +32,7 @@ class BatchPipelineRequest(BaseModel):
     garment_img: str
     human_imgs: list[str]
     garment_desc: str = "Women's light blue denim jeans"
+    category: str = "lower_body"
 
 
 @router.post("/run")
@@ -47,6 +49,7 @@ async def run_pipeline(req: PipelineRequest):
         human_img=req.human_img,
         garment_img=req.garment_img,
         garment_desc=req.garment_desc,
+        category=req.category,
     )
     tryon_local = await download_image(tryon_path, "output/tryon/pipeline_tryon.png")
     results["stages"]["tryon"] = {"local": tryon_local}
@@ -92,6 +95,7 @@ async def run_batch_pipeline(req: BatchPipelineRequest):
                 human_img=human_img,
                 garment_img=req.garment_img,
                 garment_desc=req.garment_desc,
+                category=req.category,
             )
             tryon_local = await download_image(
                 tryon_path, f"output/tryon/batch_{i:04d}.png"
@@ -130,11 +134,17 @@ async def run_batch_pipeline(req: BatchPipelineRequest):
 
 
 @router.post("/daily")
-async def trigger_daily_pipeline(max_videos: int = 100, concurrency: int = 3):
+async def trigger_daily_pipeline(
+    max_videos: int = 100,
+    concurrency: int = 3,
+    category_name: str = "jeans",
+):
     """Manually trigger the daily pipeline.
 
-    Scans assets/products/ and assets/models/ directories,
-    generates try-on videos for all combinations.
+    Args:
+        category_name: Category name (e.g. "jeans", "tshirts").
     """
-    result = await run_daily_pipeline(max_videos=max_videos, concurrency=concurrency)
+    result = await run_daily_pipeline(
+        max_videos=max_videos, concurrency=concurrency, category_name=category_name
+    )
     return result
